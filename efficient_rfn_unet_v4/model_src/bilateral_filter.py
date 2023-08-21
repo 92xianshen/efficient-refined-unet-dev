@@ -36,7 +36,6 @@ class BilateralHighDimFilter(tf.Module):
             self.alpha_prod,
         ) = self.computation.init(
             features,
-            dim=self.model_config.dim,
             range_sigma=self.model_config.range_sigma,
             space_sigma=self.model_config.space_sigma,
             range_padding=self.model_config.range_padding,
@@ -46,7 +45,6 @@ class BilateralHighDimFilter(tf.Module):
     def compute(self, inp: tf.Tensor = None) -> None:
         return self.computation.compute(
             inp,
-            dim=self.model_config.dim,
             splat_coords=self.splat_coords,
             data_size=self.data_size,
             data_shape=self.data_shape,
