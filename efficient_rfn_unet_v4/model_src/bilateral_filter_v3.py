@@ -5,26 +5,76 @@ Bilateral high-dim filter, built with TF 2.x.
 import tensorflow as tf
 
 
-class BilateralHighDimFilterComputation(tf.Module):
+class BilateralHighDimFilter(tf.Module):
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        n_channels: int,
+        name: str = None,
+    ):
+        super().__init__(name)
+
+        self.height, self.width, self.n_channels = (
+            tf.constant(height, dtype=tf.int32),
+            tf.constant(width, dtype=tf.int32),
+            tf.constant(n_channels, dtype=tf.int32),
+        )
+
+        self.range_padding = tf.constant(2, dtype=tf.int32)
+        self.space_padding = tf.constant(2, dtype=tf.int32)
+
+        self.splat_coords = tf.Variable(
+            tf.constant(
+                0,
+                dtype=tf.int32,
+                shape=[
+                    self.height * self.width,
+                ],
+            ),
+            trainable=False,
+        )
+        self.data_size = tf.Variable(tf.constant(0, dtype=tf.int32), trainable=False)
+        self.data_shape = tf.Variable(
+            tf.constant(
+                0,
+                dtype=tf.int32,
+                shape=[
+                    self.n_channels + 2,
+                ],
+            ),
+            trainable=False,
+        )
+        self.slice_idx = tf.Variable(
+            tf.constant(
+                0,
+                dtype=tf.int32,
+                shape=[
+                    2 ** (n_channels + 2) * self.height * self.width,
+                ],
+            ),
+            trainable=False,
+        )
+        self.alpha_prod = tf.Variable(
+            tf.constant(
+                0,
+                dtype=tf.float32,
+                shape=[
+                    2 ** (n_channels + 2),
+                    self.height * self.width,
+                ],
+            ),
+            trainable=False,
+        )
+
     @tf.function(
         input_signature=[
-            tf.TensorSpec(
-                shape=[None, None, 3], dtype=tf.float32
-            ),  # of `features`, [H, W, C], float32
-            tf.TensorSpec(shape=[], dtype=tf.float32),  # of `range_sigma`, [], float32
-            tf.TensorSpec(shape=[], dtype=tf.float32),  # of `space_sigma`, [], float32
-            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `range_padding`, [], int32
-            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `space_padding`, [], int32
+            tf.TensorSpec(shape=[None, None, 3], dtype=tf.float32),
+            tf.TensorSpec(shape=[], dtype=tf.float32),
+            tf.TensorSpec(shape=[], dtype=tf.float32),
         ]
     )
-    def init(
-        self,
-        image: tf.Tensor,
-        range_sigma: tf.float32,
-        space_sigma: tf.float32,
-        range_padding: tf.int32,
-        space_padding: tf.int32,
-    ) -> tf.Tensor:
+    def init(self, image: tf.Tensor, range_sigma: tf.float32, space_sigma: tf.float32):
         """
         Initialize, `feature` should be three-channel and channel-last
         """
@@ -53,14 +103,20 @@ class BilateralHighDimFilterComputation(tf.Module):
 
             # - Depths of data grid
             small_chdepth = (
-                tf.cast(ch_delta / range_sigma, dtype=tf.int32) + 1 + 2 * range_padding
+                tf.cast(ch_delta / range_sigma, dtype=tf.int32)
+                + 1
+                + 2 * self.range_padding
             )
 
             # - Range coordinates of splat, shape [H, W]
-            splat_chh = tf.cast(chh / range_sigma + 0.5, dtype=tf.int32) + range_padding
+            splat_chh = (
+                tf.cast(chh / range_sigma + 0.5, dtype=tf.int32) + self.range_padding
+            )
 
             # - Range coordinates of slice, shape [H, W]
-            slice_chh = chh / range_sigma + tf.cast(range_padding, dtype=tf.float32)
+            slice_chh = chh / range_sigma + tf.cast(
+                self.range_padding, dtype=tf.float32
+            )
 
             # - Slice interpolation range coordinate pairs
             ch_index, chh_index = get_both_indices(
@@ -90,26 +146,26 @@ class BilateralHighDimFilterComputation(tf.Module):
         small_height = (
             tf.cast(tf.cast(height - 1, tf.float32) / space_sigma, dtype=tf.int32)
             + 1
-            + 2 * space_padding
+            + 2 * self.space_padding
         )
         small_width = (
             tf.cast(tf.cast(width - 1, tf.float32) / space_sigma, dtype=tf.int32)
             + 1
-            + 2 * space_padding
+            + 2 * self.space_padding
         )
 
         # Space coordinates, shape [H, W], dtype int
         yy, xx = tf.meshgrid(tf.range(height), tf.range(width), indexing="ij")  # [H, W]
         yy, xx = tf.cast(yy, dtype=tf.float32), tf.cast(xx, dtype=tf.float32)
         # Spatial coordinates of splat, shape [H, W]
-        splat_yy = tf.cast(yy / space_sigma + 0.5, dtype=tf.int32) + space_padding
-        splat_xx = tf.cast(xx / space_sigma + 0.5, dtype=tf.int32) + space_padding
+        splat_yy = tf.cast(yy / space_sigma + 0.5, dtype=tf.int32) + self.space_padding
+        splat_xx = tf.cast(xx / space_sigma + 0.5, dtype=tf.int32) + self.space_padding
         # Spatial coordinates of slice, shape [H, W]
         slice_yy = tf.cast(yy, dtype=tf.float32) / space_sigma + tf.cast(
-            space_padding, dtype=tf.float32
+            self.space_padding, dtype=tf.float32
         )
         slice_xx = tf.cast(xx, dtype=tf.float32) / space_sigma + tf.cast(
-            space_padding, dtype=tf.float32
+            self.space_padding, dtype=tf.float32
         )
 
         # Spatial interpolation index of slice
@@ -204,16 +260,18 @@ class BilateralHighDimFilterComputation(tf.Module):
         )  # [2^d, d, H x W]
 
         # Shape and size of bialteral data grid
-        data_shape = tf.stack(
-            [
-                small_height,
-                small_width,
-                small_rdepth,
-                small_gdepth,
-                small_bdepth,
-            ],
+        self.data_shape.assign(
+            tf.stack(
+                [
+                    small_height,
+                    small_width,
+                    small_rdepth,
+                    small_gdepth,
+                    small_bdepth,
+                ],
+            )
         )
-        data_size = (
+        self.data_size.assign(
             small_height * small_width * small_rdepth * small_gdepth * small_bdepth
         )
 
@@ -223,66 +281,29 @@ class BilateralHighDimFilterComputation(tf.Module):
             * small_gdepth
             + splat_gg
         ) * small_bdepth + splat_bb
-        splat_coords = tf.reshape(
-            splat_coords,
-            shape=[
-                -1,
-            ],
+        self.splat_coords.assign(
+            tf.reshape(
+                splat_coords,
+                shape=[
+                    -1,
+                ],
+            )
         )  # [H x W, ]
 
         # Interpolation indices and alphas of bilateral slice
-        slice_idx = coord_transform(idx)
-        alpha_prod = tf.math.reduce_prod(alpha_prods, axis=1)  # [2^d, H x W]
-
-        return splat_coords, data_size, data_shape, slice_idx, alpha_prod
+        self.slice_idx.assign(coord_transform(idx))
+        self.alpha_prod.assign(tf.math.reduce_prod(alpha_prods, axis=1))  # [2^d, H x W]
 
     @tf.function(
         input_signature=[
-            tf.TensorSpec(
-                shape=[None, None, None], dtype=tf.float32
-            ),  # of `inp`, [H, W, N],
-            tf.TensorSpec(
-                shape=[
-                    None,
-                ],
-                dtype=tf.int32,
-            ),  # of `splat_coords`, [H x W, ], int32
-            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `data_size`, [], int32
-            tf.TensorSpec(
-                shape=[
-                    None,
-                ],
-                dtype=tf.int32,
-            ),  # of `data_shape`, [d, ], int32
-            tf.TensorSpec(
-                shape=[
-                    None,
-                ],
-                dtype=tf.int32,
-            ),  # of `slice_idx`, [2^d x H x W, ], int32
-            tf.TensorSpec(
-                shape=[
-                    None,
-                    None,
-                ],
-                dtype=tf.float32,
-            ),  # of `alpha_prod`, [H x W, ], float32
-            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `n_iters`, [], int32
+            tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
         ]
     )
-    def compute(
-        self,
-        inp: tf.Tensor,
-        splat_coords: tf.Tensor,
-        data_size: tf.int32,
-        data_shape: tf.Tensor,
-        slice_idx: tf.Tensor,
-        alpha_prod: tf.Tensor,
-        n_iters: tf.int32,
-    ) -> tf.Tensor:
+    def compute(self, inp: tf.Tensor) -> tf.Tensor:
         height, width = tf.shape(inp)[0], tf.shape(inp)[1]
         size = height * width
         dim = tf.constant(5, dtype=tf.int32)
+        n_iters = tf.constant(2, dtype=tf.int32)
 
         # Channel-last to channel-first because tf.map_fn
         inpT = tf.transpose(inp, perm=[2, 0, 1])
@@ -297,17 +318,17 @@ class BilateralHighDimFilterComputation(tf.Module):
             )  # [H x W, ]
             # ==== Splat ====
             data_flat = tf.math.bincount(
-                splat_coords,
+                self.splat_coords,
                 weights=inp_flat,
-                minlength=data_size,
-                maxlength=data_size,
+                minlength=self.data_size,
+                maxlength=self.data_size,
                 dtype=tf.float32,
             )
-            data = tf.reshape(data_flat, shape=data_shape)
+            data = tf.reshape(data_flat, shape=self.data_shape)
 
             # ==== Blur ====
             buffer = tf.zeros_like(data)
-            perm = [1, 2, 3, 4, 0]
+            perm = tf.constant([1, 2, 3, 4, 0], dtype=tf.int32)
 
             for _ in range(n_iters):
                 buffer, data = data, buffer
@@ -328,10 +349,10 @@ class BilateralHighDimFilterComputation(tf.Module):
                         -1,
                     ],
                 ),
-                slice_idx,
+                self.slice_idx,
             )  # (2^dim x h x w)
             data_slice = tf.reshape(data_slice, shape=[-1, size])  # (2^dim, h x w)
-            interpolations = alpha_prod * data_slice
+            interpolations = self.alpha_prod * data_slice
             interpolation = tf.reduce_sum(interpolations, axis=0)
             interpolation = tf.reshape(interpolation, shape=[height, width])
 

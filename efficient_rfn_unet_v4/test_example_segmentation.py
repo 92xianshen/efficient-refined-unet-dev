@@ -9,16 +9,15 @@ from model_src.crf import CRF
 
 image_name = "../../data/examples/im2.png"
 anno_name = "../../data/examples/anno2.png"
-crf_computation_path = "./saved_model/crf_computation"
+computation_path = "computation/crf"
 
 unary, image, n_labels = image2unary(image_name, anno_name)
 h, w, c = image.shape
 
-crf = CRF(crf_config=CRFConfig(), crf_computation_path=crf_computation_path)
+crf = CRF(model_config=CRFConfig(), computation_path=computation_path)
 
 start = time.time()
-Q = crf(unary.astype(np.float32), image.astype(np.float32)).numpy()
-MAP = np.argmax(Q, axis=-1)
+MAP = crf.inference(unary.astype(np.float32), image.astype(np.float32)).numpy()
 print("Time: ", time.time() - start)
 plt.imshow(MAP)
 plt.show()

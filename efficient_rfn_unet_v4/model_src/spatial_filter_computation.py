@@ -5,24 +5,20 @@ Bilateral high-dim filter, built with TF 2.x.
 import tensorflow as tf
 
 
-class BilateralHighDimFilterComputation(tf.Module):
+class SpatialHighDimFilterComputation(tf.Module):
     @tf.function(
         input_signature=[
-            tf.TensorSpec(
-                shape=[None, None, 3], dtype=tf.float32
-            ),  # of `features`, [H, W, C], float32
-            tf.TensorSpec(shape=[], dtype=tf.float32),  # of `range_sigma`, [], float32
+            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `height`, [], int32
+            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `width`, [], int32
             tf.TensorSpec(shape=[], dtype=tf.float32),  # of `space_sigma`, [], float32
-            tf.TensorSpec(shape=[], dtype=tf.int32),  # of `range_padding`, [], int32
             tf.TensorSpec(shape=[], dtype=tf.int32),  # of `space_padding`, [], int32
         ]
     )
     def init(
         self,
-        image: tf.Tensor,
-        range_sigma: tf.float32,
+        height: tf.int32,
+        width: tf.int32,
         space_sigma: tf.float32,
-        range_padding: tf.int32,
         space_padding: tf.int32,
     ) -> tf.Tensor:
         """
@@ -44,47 +40,8 @@ class BilateralHighDimFilterComputation(tf.Module):
             right_index = clamp(left_index + 1, min_value=0, max_value=size - 1)
             return left_index, right_index
 
-        # Decompose `features` into r, g, and b channels
-        def create_range_params(ch):
-            ch_min, ch_max = tf.reduce_min(ch), tf.reduce_max(ch)
-            ch_delta = ch_max - ch_min
-            # - Range coordinates, shape [H, W], dtype float
-            chh = ch - ch_min
-
-            # - Depths of data grid
-            small_chdepth = (
-                tf.cast(ch_delta / range_sigma, dtype=tf.int32) + 1 + 2 * range_padding
-            )
-
-            # - Range coordinates of splat, shape [H, W]
-            splat_chh = tf.cast(chh / range_sigma + 0.5, dtype=tf.int32) + range_padding
-
-            # - Range coordinates of slice, shape [H, W]
-            slice_chh = chh / range_sigma + tf.cast(range_padding, dtype=tf.float32)
-
-            # - Slice interpolation range coordinate pairs
-            ch_index, chh_index = get_both_indices(
-                slice_chh, small_chdepth
-            )  # [H, W], [H, W]
-
-            # - Intepolation factors
-            ch_alpha = tf.reshape(
-                slice_chh - tf.cast(ch_index, dtype=tf.float32),
-                shape=[
-                    -1,
-                ],
-            )  # [H x W, ]
-
-            return small_chdepth, splat_chh, ch_index, chh_index, ch_alpha
-
-        height, width = tf.shape(image)[0], tf.shape(image)[1]
         size = height * width
-        dim = 5
-
-        r, g, b = image[..., 0], image[..., 1], image[..., 2]
-        small_rdepth, splat_rr, r_index, rr_index, r_alpha = create_range_params(r)
-        small_gdepth, splat_gg, g_index, gg_index, g_alpha = create_range_params(g)
-        small_bdepth, splat_bb, b_index, bb_index, b_alpha = create_range_params(b)
+        dim = 2
 
         # Height and width of data grid, scala, dtype int
         small_height = (
@@ -136,39 +93,18 @@ class BilateralHighDimFilterComputation(tf.Module):
             yy_index,
             x_index,
             xx_index,
-            r_index,
-            rr_index,
-            g_index,
-            gg_index,
-            b_index,
-            bb_index,
         ]  # [10, H x W]
         alphas = [
             1.0 - y_alpha,
             y_alpha,
             1.0 - x_alpha,
             x_alpha,
-            1.0 - r_alpha,
-            r_alpha,
-            1.0 - g_alpha,
-            g_alpha,
-            1.0 - b_alpha,
-            b_alpha,
         ]  # [10, H x W]
 
         # Method of coordinate transformation
         def coord_transform(idx):
             return tf.reshape(
-                (
-                    (
-                        (idx[:, 0, :] * small_width + idx[:, 1, :]) * small_rdepth
-                        + idx[:, 2, :]
-                    )
-                    * small_gdepth
-                    + idx[:, 3, :]
-                )
-                * small_bdepth
-                + idx[:, 4, :],
+                idx[:, 0, :] * small_width + idx[:, 1, :],
                 shape=[
                     -1,
                 ],
@@ -179,9 +115,6 @@ class BilateralHighDimFilterComputation(tf.Module):
         # Permutation
         permutations = tf.stack(
             tf.meshgrid(
-                tf.range(2),
-                tf.range(2),
-                tf.range(2),
                 tf.range(2),
                 tf.range(2),
                 indexing="ij",
@@ -208,21 +141,12 @@ class BilateralHighDimFilterComputation(tf.Module):
             [
                 small_height,
                 small_width,
-                small_rdepth,
-                small_gdepth,
-                small_bdepth,
             ],
         )
-        data_size = (
-            small_height * small_width * small_rdepth * small_gdepth * small_bdepth
-        )
+        data_size = small_height * small_width
 
         # Bilateral splat coordinates, shape [H x W, ]
-        splat_coords = (
-            ((splat_yy * small_width + splat_xx) * small_rdepth + splat_rr)
-            * small_gdepth
-            + splat_gg
-        ) * small_bdepth + splat_bb
+        splat_coords = splat_yy * small_width + splat_xx
         splat_coords = tf.reshape(
             splat_coords,
             shape=[
@@ -282,7 +206,7 @@ class BilateralHighDimFilterComputation(tf.Module):
     ) -> tf.Tensor:
         height, width = tf.shape(inp)[0], tf.shape(inp)[1]
         size = height * width
-        dim = tf.constant(5, dtype=tf.int32)
+        dim = 2
 
         # Channel-last to channel-first because tf.map_fn
         inpT = tf.transpose(inp, perm=[2, 0, 1])
@@ -307,7 +231,7 @@ class BilateralHighDimFilterComputation(tf.Module):
 
             # ==== Blur ====
             buffer = tf.zeros_like(data)
-            perm = [1, 2, 3, 4, 0]
+            perm = [1, 0]
 
             for _ in range(n_iters):
                 buffer, data = data, buffer
