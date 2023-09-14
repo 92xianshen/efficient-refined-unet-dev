@@ -77,7 +77,7 @@ class PermutohedralRefinedUNetX(tf.Module):
 
         print("Modules activated.")
 
-    def __call__(self, image: tf.Tensor) -> tf.Tensor:
+    def inference(self, image: tf.Tensor) -> tf.Tensor:
         """
         Predict and refine.
 
