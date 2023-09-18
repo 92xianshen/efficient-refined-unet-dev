@@ -189,7 +189,7 @@ class PermutohedralXFunction(tf.Module):
             ranges_key, exclusive=True, reverse=True
         )  # [d, ], row-major
         coords_1d = tf.reduce_sum(
-            (keys - mins_key) * dims_key[tf.newaxis, ...], axis=1
+            (keys - mins_key[tf.newaxis, ...]) * dims_key[tf.newaxis, ...], axis=1
         )  # [N * (d + 1), ]
 
         coords_1d_uniq, offsets = tf.unique(coords_1d)
