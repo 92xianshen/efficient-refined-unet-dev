@@ -85,7 +85,7 @@ def main():
                 print("Patch {}...".format(i))
                 x, y = record["x_train"], record["y_train"]  # [B, H, W, C]
                 # preds, rfns = inference(x)
-                rfn = model(x[0])
+                rfn = model.inference(x[0])
 
                 refinements += [rfn]
 

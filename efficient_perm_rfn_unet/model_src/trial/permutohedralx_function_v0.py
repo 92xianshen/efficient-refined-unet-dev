@@ -11,7 +11,6 @@
 + 2023.07.19: Remove `N` of `__init__()`.
 + 2023.07.20: Remove comments.
 + 2023.07.20: Partition constants and computation.
-+ 2023.09.18: Update `coords_1d`
 """
 
 import numpy as np
@@ -189,7 +188,7 @@ class PermutohedralXFunction(tf.Module):
             ranges_key, exclusive=True, reverse=True
         )  # [d, ], row-major
         coords_1d = tf.reduce_sum(
-            (keys - mins_key) * dims_key[tf.newaxis, ...], axis=1
+            keys * dims_key[tf.newaxis, ...], axis=1
         )  # [N * (d + 1), ]
 
         coords_1d_uniq, offsets = tf.unique(coords_1d)
