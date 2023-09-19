@@ -5,6 +5,7 @@ import tensorflow as tf
 
 from .perm_rfn_unet_x_config import PermRfnUNetXConfig
 from .perm_crf_computation import CRFComputation
+from .linear2 import Linear2
 
 
 class PermutohedralRefinedUNetX(tf.Module):
@@ -19,6 +20,8 @@ class PermutohedralRefinedUNetX(tf.Module):
         self.crf_computation = CRFComputation(self.config)
         self.unary_generator = tf.saved_model.load(ugenerator_path)
 
+        self.linear2 = Linear2()
+
         print("Activate modules...")
         self.unary_generator(
             tf.ones(
@@ -29,6 +32,12 @@ class PermutohedralRefinedUNetX(tf.Module):
                     self.config.n_channels,
                 ],
                 dtype=tf.float32,
+            )
+        )
+
+        self.linear2(
+            tf.ones(
+                shape=[self.config.height, self.config.width, self.config.d_bifeats - 2]
             )
         )
 
@@ -89,7 +98,7 @@ class PermutohedralRefinedUNetX(tf.Module):
         """
 
         unary = self.unary_generator(image[tf.newaxis, ...])[0]  # [H, W, N]
-        ref = image[..., 4:1:-1]  # [H, W, 3]
+        ref = self.linear2(image[..., 4:1:-1])  # [H, W, 3]
 
         (
             bilateral_coords_1d_uniq,
