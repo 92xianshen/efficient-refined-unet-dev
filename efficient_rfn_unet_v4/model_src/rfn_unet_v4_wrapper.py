@@ -5,6 +5,7 @@ import tensorflow as tf
 
 from .crf_computation import CRFComputation
 from .rfn_unet_v4_config import RefinedUNetV4Config
+from .linear2 import Linear2
 
 
 class RefinedUNetV4(tf.Module):
@@ -20,6 +21,8 @@ class RefinedUNetV4(tf.Module):
         self.crf_computation = CRFComputation()
         self.unary_generator = tf.saved_model.load(ugenerator_path)
 
+        self.linear2 = Linear2()
+
         print("Activate modules...")
         self.unary_generator(
             tf.ones(
@@ -31,6 +34,9 @@ class RefinedUNetV4(tf.Module):
                 ],
                 dtype=tf.float32,
             )
+        )
+        self.linear2(
+            tf.ones(shape=[self.config.height, self.config.width, 3], dtype=tf.float32)
         )
         self.crf_computation.mean_field_approximation(
             tf.ones(
@@ -60,7 +66,7 @@ class RefinedUNetV4(tf.Module):
         """
 
         unary = self.unary_generator(image[tf.newaxis, ...])[0]  # [H, W, N]
-        ref = image[..., 4:1:-1]  # [H, W, 3]
+        ref = self.linear2(image[..., 4:1:-1])  # [H, W, 3]
 
         rfn = self.crf_computation.mean_field_approximation(
             unary,
